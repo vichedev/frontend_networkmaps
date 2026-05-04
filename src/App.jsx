@@ -32,6 +32,16 @@ import {
 } from "./services/api";
 import { socketService } from "./services/socket";
 
+// ─── NUEVO: catálogo de puertos Mikrotik ──────────────────────────────────────
+// Usado para auto-rellenar interfaces y tipo de enlace cuando el usuario
+// conecta desde un puerto físico del modelo (ether3, sfp-sfpplus1, qsfp28-1…).
+import {
+  findPortByHandleId,
+  PORT_TYPE_TO_LINK_TYPE,
+  PORT_TYPE_TO_BANDWIDTH,
+  MODEL_PORTS,
+} from "./config/routerModels";
+
 const nodeTypes = { customNode: CustomNode, cloudNode: CloudNode };
 const edgeTypes = { editableEdge: EditableEdge, wanEdge: WanEdge };
 
@@ -239,20 +249,37 @@ const WanConnectionLine = ({
   );
 };
 
-// ── Sanitiza un handle: si era "target-top-0" / "source-top-0"
-// (handles eliminados al reservar Top para WAN), lo reemplaza con null.
-// sanitizeHandle — limpia handles obsoletos de conexiones guardadas en BD.
-// Solo elimina los handles WAN placeholder (wan-placeholder-*) y handles
-// que tenían formato "-top-" del esquema antiguo cuando Top era global.
-// NO elimina handles normales en Top de nodos no raíz — son válidos.
+// ─── sanitizeHandle ───────────────────────────────────────────────────────────
+// Limpia handles OBSOLETOS de conexiones guardadas en la BD bajo el esquema
+// anterior (handles genéricos azul/verde tipo `source-bottom-0`, `target-left-0`).
+// Ese esquema ya no existe — ahora los handles SON los puertos del modelo
+// (ether1, sfp28-3, qsfp28-1, wan-in-xxx, wan-placeholder-N).
+//
+// Si el handle guardado NO es un puerto conocido del catálogo Y NO es WAN,
+// lo devolvemos como null — el edge se dibujará anclado al centro del nodo.
+const LEGACY_HANDLE_RE = /^(source|target)-(top|bottom|left|right)-\d+$/;
+
 const sanitizeHandle = (handle) => {
   if (!handle) return null;
-  // Handles WAN placeholder — ya no existen una vez conectado un proveedor real
+  // Handles WAN placeholder — desaparecen cuando se conecta un proveedor real
   if (handle.startsWith("wan-placeholder-")) return null;
-  // Handles del esquema anterior donde Top estaba reservado globalmente
-  // Solo aplica al formato exacto "source-top-N" / "target-top-N"
-  if (/^(source|target)-top-\d+$/.test(handle)) return null;
+  // Handles WAN reales (wan-in-xxx, wan-out) — se conservan
+  if (handle.startsWith("wan-")) return handle;
+  // Handles legacy del sistema anterior (source-bottom-0, target-left-0, etc.)
+  if (LEGACY_HANDLE_RE.test(handle)) return null;
+  // Todo lo demás (ether1, sfp28-3, qsfp28-1, port1, etc.) se conserva
   return handle;
+};
+
+// ─── resolvePortOnNode ────────────────────────────────────────────────────────
+// Busca un puerto del catálogo por handleId dentro de un nodo dado.
+// Si el handle es un puerto real del modelo, devuelve el objeto port con
+// { id, name, type, speed, note }. Si no, devuelve null.
+const resolvePortOnNode = (node, handleId) => {
+  if (!node || !handleId) return null;
+  const model = node.data?.model;
+  if (!model) return null;
+  return findPortByHandleId(model, handleId);
 };
 
 // ── Edge normal (nodo ↔ nodo) ─────────────────────────────────────────────
@@ -264,6 +291,10 @@ const connectionToEdge = (conn, existingEdge = null) => ({
   targetHandle: sanitizeHandle(conn.targetHandle),
   type: "editableEdge",
   animated: false,
+  // updatable: true → habilita el drag de los extremos para reconectar.
+  // Aunque React Flow 11+ lo trae true por defecto en muchas configuraciones,
+  // lo marcamos explícitamente para asegurar consistencia.
+  updatable: true,
   style: { stroke: "#3b82f6", strokeWidth: 2 },
   data: {
     connectionId: conn.id,
@@ -298,6 +329,7 @@ const cloudConnectionToEdge = (conn, existingEdge = null, allClouds = []) => {
     targetHandle: `wan-in-${conn.cloudId}`,
     type: "wanEdge",
     animated: false,
+    updatable: true,
     data: {
       connectionId: conn.id,
       nodePort: conn.nodePort ?? "",
@@ -323,7 +355,42 @@ const BANDWIDTHS = [
   "100 Gbps",
 ];
 
-const askConnectionDetails = async (sourceName, targetName) => {
+// ─── askConnectionDetails ─────────────────────────────────────────────────────
+// El modal ahora recibe `defaults` — objeto con valores pre-rellenados derivados
+// del puerto del catálogo (si el usuario arrastró desde un puerto físico real,
+// sabemos qué nombre de interfaz poner, qué tipo de cable y qué bandwidth).
+// El usuario puede ajustar o confirmar tal cual.
+const askConnectionDetails = async (sourceName, targetName, defaults = {}) => {
+  const {
+    sourceInterface = "",
+    targetInterface = "",
+    linkType = "",
+    bandwidth = "",
+    sourcePortInfo = null,
+    targetPortInfo = null,
+  } = defaults;
+
+  // Cabecera informativa si ambos puertos vienen del catálogo
+  const portInfoHeader =
+    sourcePortInfo && targetPortInfo
+      ? `
+        <div style="margin-bottom:12px;padding:8px 12px;background:#f0fdf4;
+          border-radius:8px;border:1px solid #bbf7d0;font-size:11px;
+          color:#166534;display:flex;align-items:center;gap:8px">
+          <span style="font-size:14px">✨</span>
+          <div>
+            Autocompletado desde puertos del modelo:
+            <code style="font-family:monospace;color:#15803d;font-weight:700">
+              ${sourcePortInfo.type} ${sourcePortInfo.speed}
+            </code>
+            →
+            <code style="font-family:monospace;color:#15803d;font-weight:700">
+              ${targetPortInfo.type} ${targetPortInfo.speed}
+            </code>
+          </div>
+        </div>`
+      : "";
+
   const { value } = await Swal.fire({
     title: "Detalles del enlace",
     width: 480,
@@ -339,12 +406,14 @@ const askConnectionDetails = async (sourceName, targetName) => {
           <span style="color:#94a3b8;font-size:18px">→</span>
           <span style="font-weight:700;color:#1e293b">${targetName}</span>
         </div>
+        ${portInfoHeader}
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">
           <div>
             <label style="font-size:11px;font-weight:700;color:#3b82f6;
               text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px">
               Interfaz origen</label>
             <input id="srcIface" class="swal2-input" placeholder="ether2, sfp1…"
+              value="${sourceInterface}"
               style="margin:0;width:100%;font-family:monospace;font-size:12px;
               border-color:#bfdbfe;background:#eff6ff">
           </div>
@@ -353,6 +422,7 @@ const askConnectionDetails = async (sourceName, targetName) => {
               text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px">
               Interfaz destino</label>
             <input id="dstIface" class="swal2-input" placeholder="ether3, sfp2…"
+              value="${targetInterface}"
               style="margin:0;width:100%;font-family:monospace;font-size:12px;
               border-color:#bbf7d0;background:#f0fdf4">
           </div>
@@ -364,8 +434,8 @@ const askConnectionDetails = async (sourceName, targetName) => {
           ${LINK_TYPES.map(
             (t) => `
             <label style="cursor:pointer">
-              <input type="radio" name="linkType" value="${t}" style="display:none">
-              <span class="lt-chip" style="display:inline-block;padding:4px 10px;
+              <input type="radio" name="linkType" value="${t}" style="display:none" ${t === linkType ? "checked" : ""}>
+              <span class="lt-chip${t === linkType ? " active" : ""}" style="display:inline-block;padding:4px 10px;
                 border-radius:20px;border:1.5px solid #e2e8f0;font-size:11px;
                 font-weight:500;color:#64748b;background:#f8fafc">${t}</span>
             </label>`,
@@ -378,14 +448,15 @@ const askConnectionDetails = async (sourceName, targetName) => {
           ${BANDWIDTHS.map(
             (b) => `
             <label style="cursor:pointer">
-              <input type="radio" name="bandwidth" value="${b}" style="display:none">
-              <span class="bw-chip" data-bw="${b}" style="display:inline-block;padding:3px 9px;
+              <input type="radio" name="bandwidth" value="${b}" style="display:none" ${b === bandwidth ? "checked" : ""}>
+              <span class="bw-chip${b === bandwidth ? " active" : ""}" data-bw="${b}" style="display:inline-block;padding:3px 9px;
                 border-radius:20px;border:1.5px solid #e2e8f0;font-size:11px;
                 color:#64748b;background:#f8fafc">${b}</span>
             </label>`,
           ).join("")}
         </div>
         <input id="bwCustom" class="swal2-input" placeholder="O escribe un valor…"
+          value="${bandwidth}"
           style="margin:0 0 12px;width:100%;font-size:12px">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
           <div>
@@ -441,7 +512,9 @@ const askConnectionDetails = async (sourceName, targetName) => {
 };
 
 // ── Modal conexión WAN ────────────────────────────────────────────────────
-const askWanDetails = async (cloudName, nodeName) => {
+// Acepta un defaultPort derivado del handle WAN usado (si viene de un puerto
+// del catálogo del nodo destino).
+const askWanDetails = async (cloudName, nodeName, defaultPort = "") => {
   const { value } = await Swal.fire({
     title: "☁️ Enlace WAN",
     html: `
@@ -465,6 +538,7 @@ const askWanDetails = async (cloudName, nodeName) => {
           Puerto WAN del nodo padre</label>
         <input id="wanPort" class="swal2-input"
           placeholder="ether1, sfp-sfpplus1, wan1…"
+          value="${defaultPort}"
           style="width:100%;font-family:monospace;margin:0;font-size:13px;
           border-color:#bfdbfe;background:#eff6ff">
         <p style="font-size:11px;color:#94a3b8;margin-top:6px">
@@ -550,9 +624,13 @@ function App() {
     });
   };
 
+  // ─── handleHandlesChange (DEPRECADO pero preservado para compatibilidad) ──
+  // Con el nuevo sistema de puertos físicos, los handles vienen del catálogo
+  // del modelo y NO son editables por el usuario. El CustomNode ya no llama
+  // a este callback (no muestra el panel ⚙ para modelos con catálogo). Lo
+  // mantenemos por si algún código legacy lo invoca — no hará nada dañino.
   const handleHandlesChange = useCallback(
     async (nodeId, updatedHandles) => {
-      // 1. Actualizar handles del nodo
       setNodes((nds) =>
         nds.map((n) =>
           n.id === nodeId
@@ -560,32 +638,13 @@ function App() {
             : n,
         ),
       );
-
-      // 2. Forzar re-render de edges conectados a este nodo.
-      //    Cuando los handles se redistribuyen, sus offsets CSS cambian pero
-      //    los IDs se mantienen. ReactFlow necesita recalcular los endpoints
-      //    de los edges que apuntan a esos handles.
-      //    Tocar una propiedad del edge (style) fuerza el recálculo.
-      setEdges((eds) =>
-        eds.map((e) => {
-          if (e.source !== nodeId && e.target !== nodeId) return e;
-          // Verificar si alguno de los handles del edge está en updatedHandles
-          const handleIds = updatedHandles.map((h) => h.id);
-          const srcMoved = handleIds.includes(e.sourceHandle);
-          const tgtMoved = handleIds.includes(e.targetHandle);
-          if (!srcMoved && !tgtMoved) return e;
-          // Forzar re-render tocando el estilo (no cambia nada visual)
-          return { ...e, style: { ...e.style } };
-        }),
-      );
-
       try {
         await nodesApi.updateHandles(nodeId, updatedHandles);
       } catch (err) {
         console.error(err);
       }
     },
-    [setNodes, setEdges],
+    [setNodes],
   );
 
   const handleModelChange = useCallback(
@@ -736,27 +795,21 @@ function App() {
   );
 
   // ── makeReactFlowNode ─────────────────────────────────────────────────────
+  // Con el nuevo sistema, los handles físicos (puertos) se construyen dentro
+  // del CustomNode a partir del catálogo del modelo. Aquí solo nos encargamos
+  // de los handles WAN (naranja, arriba, solo nodo raíz) — el CustomNode los
+  // renderiza junto con los puertos reales.
   const makeReactFlowNode = useCallback(
     (nodeData, existingNode = null, wanHandles = []) => {
-      const baseHandles = nodeData.handles?.length
-        ? nodeData.handles
-        : (existingNode?.data?.handles ?? buildDefaultHandles());
-
-      // Para nodo RAÍZ: quitar handles normales en Top (reservado exclusivamente
-      // para WAN naranjas) y quitar WAN anteriores (se reemplazan con wanHandles).
-      // Para nodos NORMALES: solo quitar WAN anteriores — Top está permitido
-      // para handles azules/verdes normales.
-      const normalHandles = nodeData.isRootNode
-        ? baseHandles.filter((h) => !h.isWan && h.position !== "top")
-        : baseHandles.filter((h) => !h.isWan);
-
       return {
         id: nodeData.id,
         type: "customNode",
         position: { x: nodeData.posX, y: nodeData.posY },
         data: {
           ...nodeData,
-          handles: [...normalHandles, ...wanHandles],
+          // Solo pasamos los handles WAN — los puertos físicos los gestiona
+          // el CustomNode a partir del modelo.
+          handles: wanHandles,
           model: nodeData.model ?? existingNode?.data?.model ?? "GENERIC",
           onHandlesChange: handleHandlesChange,
           onModelChange: handleModelChange,
@@ -841,11 +894,7 @@ function App() {
   };
 
   // ── silentRefresh ─────────────────────────────────────────────────────────
-  // Recarga los datos del mapa sin interrumpir la experiencia visual:
-  //   • Sin spinner de carga
-  //   • Sin fitView — el viewport no se mueve
-  //   • Merge inteligente: preserva posición y handles de nodos ya renderizados
-  //   • Solo actualiza datos que cambiaron (conexiones, roles, estados)
+  // Recarga los datos del mapa sin interrumpir la experiencia visual.
   const silentRefresh = useCallback(
     async (clientId) => {
       if (!clientId) return;
@@ -862,12 +911,7 @@ function App() {
         const cloudsData = cloudsRes.data ?? [];
         const cloudConns = cloudConnsRes.data ?? [];
 
-        // Actualizar nodos — merge con estado visual actual
-        // ⚠️ CRÍTICO: setNodes REEMPLAZA el estado completo.
-        // Hay que incluir TANTO customNodes como cloudNodes.
-        // Omitir los clouds hace que desaparezcan del mapa en cada refresh.
         setNodes((currentNodes) => [
-          // ── Nodos de red (customNode) ────────────────────────────────────
           ...nodesData.map((node) => {
             const existing = currentNodes.find((n) => n.id === node.id);
             const wanHandles = buildWanHandles(
@@ -877,22 +921,17 @@ function App() {
               node,
             );
             const built = makeReactFlowNode(node, existing, wanHandles);
-            // Preservar posición visual si el nodo ya estaba en pantalla
             if (existing) built.position = existing.position;
             return built;
           }),
-          // ── Nubes / proveedores (cloudNode) ──────────────────────────────
-          // Sin este spread, setNodes borra todas las nubes del estado.
           ...cloudsData.map((cloud) => {
             const existing = currentNodes.find((n) => n.id === cloud.id);
             const built = makeCloudNode(cloud, cloudsData);
-            // Preservar posición visual de la nube
             if (existing) built.position = existing.position;
             return built;
           }),
         ]);
 
-        // Actualizar edges — merge preservando waypoints del estado actual
         setEdges((currentEdges) => [
           ...connsData.map((conn) => {
             const existing = currentEdges.find(
@@ -911,15 +950,9 @@ function App() {
         console.error("silentRefresh error:", e);
       }
     },
-    [
-      setNodes,
-      setEdges,
-      buildWanHandles,
-      makeReactFlowNode,
-      makeCloudNode,
-      buildDefaultHandles,
-    ],
+    [setNodes, setEdges, buildWanHandles, makeReactFlowNode, makeCloudNode],
   );
+
   const onNodeDragStop = useCallback(
     async (_, node) => {
       if (!isEditMode) return;
@@ -941,12 +974,16 @@ function App() {
   );
 
   // ── onReconnect ───────────────────────────────────────────────────────────
+  // Cuando el usuario arrastra el extremo de un cable a otro puerto.
+  // Auto-actualiza sourceInterface/targetInterface con el nombre real del
+  // puerto nuevo, y sugiere linkType/bandwidth del catálogo si cambió el tipo.
   const onReconnect = useCallback(
     async (oldEdge, newConn) => {
       const connectionId = oldEdge.data?.connectionId;
       const isWan = oldEdge.data?.isWan;
       try {
         if (isWan) {
+          // ── WAN: borrar la antigua + crear nueva con mismo puerto ──
           if (connectionId) await cloudsApi.deleteConnection(connectionId);
           const srcNode = nodes.find((n) => n.id === newConn.source);
           const cloudId =
@@ -969,6 +1006,46 @@ function App() {
             ),
           );
         } else {
+          // ── Normal: resolver los puertos nuevos en el catálogo ──
+          const newSrcNode = nodes.find((n) => n.id === newConn.source);
+          const newTgtNode = nodes.find((n) => n.id === newConn.target);
+          const newSrcPort = resolvePortOnNode(
+            newSrcNode,
+            newConn.sourceHandle,
+          );
+          const newTgtPort = resolvePortOnNode(
+            newTgtNode,
+            newConn.targetHandle,
+          );
+
+          const sourceChanged =
+            oldEdge.source !== newConn.source ||
+            oldEdge.sourceHandle !== newConn.sourceHandle;
+          const targetChanged =
+            oldEdge.target !== newConn.target ||
+            oldEdge.targetHandle !== newConn.targetHandle;
+
+          // Decidimos qué valores heredar del edge viejo vs actualizar.
+          // Si el puerto de origen cambió Y el nuevo es del catálogo →
+          //   actualizamos sourceInterface + linkType + bandwidth.
+          // Si el puerto de destino cambió Y el nuevo es del catálogo →
+          //   actualizamos solo targetInterface.
+          let nextSourceIface = oldEdge.data?.sourceInterface ?? "";
+          let nextTargetIface = oldEdge.data?.targetInterface ?? "";
+          let nextLinkType = oldEdge.data?.linkType ?? "";
+          let nextBandwidth = oldEdge.data?.bandwidth ?? "";
+
+          if (sourceChanged && newSrcPort) {
+            nextSourceIface = newSrcPort.name;
+            const inferredLink = PORT_TYPE_TO_LINK_TYPE[newSrcPort.type];
+            const inferredBw = PORT_TYPE_TO_BANDWIDTH[newSrcPort.type];
+            if (inferredLink) nextLinkType = inferredLink;
+            if (inferredBw) nextBandwidth = inferredBw;
+          }
+          if (targetChanged && newTgtPort) {
+            nextTargetIface = newTgtPort.name;
+          }
+
           if (connectionId) await connectionsApi.delete(connectionId);
           const res = await connectionsApi.create(
             newConn.source,
@@ -977,10 +1054,12 @@ function App() {
             newConn.targetHandle,
             oldEdge.data?.waypoints ?? [],
             {
-              sourceInterface: oldEdge.data?.sourceInterface,
-              targetInterface: oldEdge.data?.targetInterface,
-              linkType: oldEdge.data?.linkType,
-              bandwidth: oldEdge.data?.bandwidth,
+              sourceInterface: nextSourceIface,
+              targetInterface: nextTargetIface,
+              linkType: nextLinkType,
+              bandwidth: nextBandwidth,
+              vlan: oldEdge.data?.vlan ?? "",
+              notes: oldEdge.data?.notes ?? "",
             },
           );
           setEdges((eds) =>
@@ -988,6 +1067,17 @@ function App() {
               e.id === oldEdge.id ? connectionToEdge(res.data) : e,
             ),
           );
+
+          // Si cambiaron source/target de nodo (no solo de puerto dentro del
+          // mismo nodo), los contadores de rol necesitan actualizarse.
+          if (
+            oldEdge.source !== newConn.source ||
+            oldEdge.target !== newConn.target
+          ) {
+            updateNodeConnectionCounts(oldEdge.source, oldEdge.target, -1);
+            updateNodeConnectionCounts(newConn.source, newConn.target, +1);
+            setTimeout(() => silentRefresh(currentClientId), 400);
+          }
         }
       } catch {
         Swal.fire({
@@ -998,7 +1088,13 @@ function App() {
         loadNetworkMap(currentClientId);
       }
     },
-    [currentClientId, setEdges, nodes],
+    [
+      currentClientId,
+      setEdges,
+      nodes,
+      updateNodeConnectionCounts,
+      silentRefresh,
+    ],
   );
 
   // ── onEdgeDoubleClick ─────────────────────────────────────────────────────
@@ -1025,11 +1121,8 @@ function App() {
           }
 
           if (edge.data?.isWan) {
-            // WAN: silentRefresh inmediato — reconstruye handles naranjos del
-            // nodo raíz (puede volver a placeholders si era el último proveedor)
             await silentRefresh(currentClientId);
           } else {
-            // Normal: quitar edge del estado y actualizar contadores de rol
             setEdges((eds) => eds.filter((e) => e.id !== edge.id));
             updateNodeConnectionCounts(edge.source, edge.target, -1);
             setTimeout(() => silentRefresh(currentClientId), 400);
@@ -1043,7 +1136,13 @@ function App() {
         }
       }
     },
-    [isEditMode, setEdges, silentRefresh, currentClientId],
+    [
+      isEditMode,
+      setEdges,
+      silentRefresh,
+      currentClientId,
+      updateNodeConnectionCounts,
+    ],
   );
 
   // ── onConnect ─────────────────────────────────────────────────────────────
@@ -1084,13 +1183,18 @@ function App() {
 
         const tHandle = params.targetHandle ?? "";
         const sHandle = params.sourceHandle ?? "";
-        const isNormalHandle = (h) => h && !h.startsWith("wan-") && h !== "";
         const nodeHandle = srcNode?.type === "cloudNode" ? tHandle : sHandle;
-        if (isNormalHandle(nodeHandle)) {
+
+        // El handle del nodo debe ser un WAN placeholder/wan-in (arriba, naranja).
+        // Si el usuario intentó conectar la nube a un puerto físico (ether1,
+        // sfp1, etc.), lo bloqueamos con mensaje claro.
+        const isWanHandle = (h) =>
+          h && (h.startsWith("wan-") || h === "wan-out");
+        if (!isWanHandle(nodeHandle)) {
           Swal.fire({
             icon: "info",
             title: "Conecta al punto naranja ☁️",
-            text: "Arrastra desde la nube hasta el punto naranja en la parte superior del nodo raíz.",
+            text: "Arrastra desde la nube hasta el punto naranja en la parte superior del nodo raíz (no a los puertos físicos).",
             confirmButtonColor: "#f97316",
           });
           return;
@@ -1122,18 +1226,12 @@ function App() {
         if (!details) return;
 
         try {
-          // 1. Guardar en BD
           await cloudsApi.createConnection(
             cloudNode.id,
             nodeNode.id,
             details.nodePort,
           );
-
-          // 2. silentRefresh inmediato — reconstruye nodos + edges + handles
-          //    desde la BD con datos 100% frescos. Evita cualquier problema de
-          //    estado stale (handles placeholder vs handles reales, edges huérfanos).
           await silentRefresh(currentClientId);
-
           Swal.fire({
             icon: "success",
             title: "☁️ Enlace WAN creado",
@@ -1174,7 +1272,26 @@ function App() {
         return;
       }
 
-      const details = await askConnectionDetails(srcName, dstName);
+      // ✨ AUTO-INFERENCIA desde el catálogo de puertos
+      // Si el usuario arrastró desde un puerto físico real (ether3, sfp28-1,
+      // qsfp28-2…), sabemos su nombre, tipo y velocidad sin preguntar.
+      const sourcePort = resolvePortOnNode(srcNode, params.sourceHandle);
+      const targetPort = resolvePortOnNode(dstNode, params.targetHandle);
+
+      const defaults = {
+        sourceInterface: sourcePort?.name ?? "",
+        targetInterface: targetPort?.name ?? "",
+        linkType: sourcePort
+          ? (PORT_TYPE_TO_LINK_TYPE[sourcePort.type] ?? "")
+          : "",
+        bandwidth: sourcePort
+          ? (PORT_TYPE_TO_BANDWIDTH[sourcePort.type] ?? "")
+          : "",
+        sourcePortInfo: sourcePort,
+        targetPortInfo: targetPort,
+      };
+
+      const details = await askConnectionDetails(srcName, dstName, defaults);
       if (!details) return;
 
       try {
@@ -1200,8 +1317,6 @@ function App() {
           showConfirmButton: false,
           timer: 2500,
         });
-        // Refresh silencioso — actualiza badges de rol (raíz/intermedio/hoja)
-        // sin mover el viewport ni mostrar spinner
         setTimeout(() => silentRefresh(currentClientId), 650);
       } catch (error) {
         const msg =
@@ -1209,7 +1324,15 @@ function App() {
         Swal.fire({ icon: "error", title: "Error", text: msg });
       }
     },
-    [isEditMode, setEdges, edges, nodes, silentRefresh, currentClientId],
+    [
+      isEditMode,
+      setEdges,
+      edges,
+      nodes,
+      silentRefresh,
+      currentClientId,
+      updateNodeConnectionCounts,
+    ],
   );
 
   // ── handleNodeUpdate ──────────────────────────────────────────────────────
@@ -1436,20 +1559,26 @@ function App() {
     });
     if (!step2) return;
 
-    // Paso 3/3: Modelo
-    const modelOpts = MIKROTIK_MODELS.map(
-      (m) => `
-      <label style="display:flex;flex-direction:column;align-items:center;gap:4px;
+    // Paso 3/3: Modelo — ahora muestra el resumen de puertos para ayudar a elegir
+    const modelOpts = MIKROTIK_MODELS.map((m) => {
+      const portCount = (MODEL_PORTS[m] ?? []).length;
+      const portSummary = portCount > 0 ? `${portCount} puertos` : "Genérico";
+      return `
+      <label style="display:flex;flex-direction:column;align-items:center;gap:3px;
         cursor:pointer;padding:8px 6px;border-radius:8px;
         border:1.5px solid #e2e8f0;background:#f8fafc;min-width:0">
         <input type="radio" name="modelPick" value="${m}" style="display:none" ${m === "GENERIC" ? "checked" : ""}>
         <span style="font-size:11px;font-weight:700;color:#1e293b">${m}</span>
-      </label>`,
-    ).join("");
+        <span style="font-size:9px;color:#64748b">${portSummary}</span>
+      </label>`;
+    }).join("");
 
     const { value: selectedModel } = await Swal.fire({
       title: "Paso 3/3 — Modelo del equipo",
-      html: `<p style="font-size:13px;color:#64748b;margin-bottom:12px">Selecciona el modelo MikroTik</p>
+      html: `<p style="font-size:13px;color:#64748b;margin-bottom:12px">
+               Selecciona el modelo MikroTik. Los puertos físicos del modelo
+               (ether, SFP, SFP+, SFP28, QSFP28) aparecerán en el panel frontal.
+             </p>
              <div id="modelGrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;text-align:center">
                ${modelOpts}
              </div>
@@ -1480,10 +1609,11 @@ function App() {
     });
     if (selectedModel === undefined) return;
 
-    // Handles según el rol
-    const handles = isRootNode
-      ? [...buildDefaultHandles(), ...buildWanPlaceholders()]
-      : buildDefaultHandles();
+    // Handles según el rol.
+    // IMPORTANTE: con el nuevo sistema, los puertos físicos NO se guardan
+    // en el campo `handles` del nodo — los construye el CustomNode desde el
+    // catálogo del modelo. Solo guardamos los placeholders WAN si es raíz.
+    const handles = isRootNode ? buildWanPlaceholders() : [];
 
     try {
       const res = await nodesApi.createNode({
@@ -1499,7 +1629,6 @@ function App() {
         model: selectedModel,
         isRootNode,
       });
-      // Garantizar que isRootNode esté en data aunque el backend no lo devuelva
       const nodeData = { ...res.data, isRootNode };
       setNodes((nds) => [
         ...nds,
@@ -1533,13 +1662,6 @@ function App() {
   };
 
   // ── Core de captura: fitView + html-to-image ──────────────────────────────
-  // Estrategia 100% compatible con cualquier versión de ReactFlow:
-  //   1. Guardar viewport actual.
-  //   2. fitView() — encuadra todos los nodos, funciona en todas las versiones.
-  //   3. Esperar repaint.
-  //   4. Capturar .react-flow__renderer con html-to-image.
-  //   5. Restaurar viewport original.
-  //
   const _capture = useCallback(
     async (format = "png") => {
       if (!reactFlowInstance) throw new Error("ReactFlow no inicializado");
@@ -1550,29 +1672,25 @@ function App() {
       const customNodes = rfNodes.filter((n) => n.type !== undefined);
       if (!customNodes.length) throw new Error("No hay nodos en el mapa");
 
-      // 1. Guardar viewport
       const prevVP = reactFlowInstance.getViewport?.() ?? {
         x: 0,
         y: 0,
         zoom: 1,
       };
 
-      // 2. fitView para encuadrar todo — funciona en todas las versiones
       await reactFlowInstance.fitView({
         padding: 0.1,
         duration: 0,
         includeHiddenNodes: false,
       });
-      await new Promise((r) => setTimeout(r, 200)); // esperar repaint
+      await new Promise((r) => setTimeout(r, 200));
 
-      // 3. Medir el renderer
       const rendererEl = document.querySelector(".react-flow__renderer");
       if (!rendererEl)
         throw new Error("No se encontró .react-flow__renderer en el DOM");
 
       const rect = rendererEl.getBoundingClientRect();
 
-      // 4. Capturar
       const { toPng, toSvg } = await import("html-to-image");
       const captureFn = format === "svg" ? toSvg : toPng;
 
@@ -1584,13 +1702,11 @@ function App() {
         cacheBust: true,
         skipFonts: false,
         filter: (node) => {
-          // Excluir elementos de UI que no deben aparecer en la imagen
           const cls = node?.classList;
           if (cls?.contains("react-flow__background")) return false;
           if (cls?.contains("react-flow__controls")) return false;
           if (cls?.contains("react-flow__minimap")) return false;
           if (node?.getAttribute?.("data-id") === "map-controls") return false;
-          // Excluir botones de la barra inferior (Agregar Equipo / Proveedor)
           if (
             node?.tagName === "BUTTON" &&
             node?.closest?.(".absolute.bottom-5")
@@ -1600,7 +1716,6 @@ function App() {
         },
       });
 
-      // 5. Restaurar viewport
       if (reactFlowInstance.setViewport) {
         reactFlowInstance.setViewport(prevVP, { duration: 0 });
       }
@@ -1740,6 +1855,7 @@ function App() {
             fitView
             nodesDraggable={isEditMode}
             nodesConnectable={isEditMode}
+            edgesUpdatable={isEditMode}
             connectionMode="loose"
             edgesFocusable
             elementsSelectable

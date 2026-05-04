@@ -14,6 +14,14 @@ import imgRB1100 from "../../assets/mikrotik/RB1100.png";
 import imgRB3011 from "../../assets/mikrotik/RB3011.png";
 import imgHEXS from "../../assets/mikrotik/HEXS.png";
 
+// ─── Catálogo de puertos por modelo ───────────────────────────────────────────
+import {
+  MODEL_PORTS,
+  PORT_TYPE_COLORS,
+  PORT_TYPE_LABELS,
+  getPortSummary,
+} from "../../config/routerModels";
+
 // ─── Metadatos de modelos ─────────────────────────────────────────────────────
 
 export const MIKROTIK_MODELS = [
@@ -35,70 +43,70 @@ export const MODEL_META = {
     label: "CCR2216-1G-12XS-2XQ",
     cat: "Core Router",
     color: "#185FA5",
-    ports: "12×SFP28 2×QSFP28",
+    ports: getPortSummary("CCR2216"),
     img: imgCCR2216,
   },
   CCR2116: {
     label: "CCR2116-12G-4S+",
     cat: "Core Router",
     color: "#185FA5",
-    ports: "12×GbE 4×SFP+",
+    ports: getPortSummary("CCR2116"),
     img: imgCCR2116,
   },
   CCR1016: {
     label: "CCR1016-12G",
     cat: "Core Router",
     color: "#3C3489",
-    ports: "12×GbE",
+    ports: getPortSummary("CCR1016"),
     img: imgCCR1016,
   },
   CCR1036: {
     label: "CCR1036-12G-4S",
     cat: "Core Router",
     color: "#3C3489",
-    ports: "12×GbE 4×SFP",
+    ports: getPortSummary("CCR1036"),
     img: imgCCR1036,
   },
   CCR1072: {
     label: "CCR1072-1G-8S+",
     cat: "Core Router",
     color: "#26215C",
-    ports: "8×SFP+ 1×GbE",
+    ports: getPortSummary("CCR1072"),
     img: imgCCR1072,
   },
   RB4011: {
     label: "RB4011iGS+RM",
     cat: "RouterBOARD",
     color: "#1e293b",
-    ports: "10×GbE 1×SFP+",
+    ports: getPortSummary("RB4011"),
     img: imgRB4011,
   },
   RB920: {
     label: "RB920",
     cat: "RouterBOARD",
     color: "#ea580c",
-    ports: "3×GbE",
+    ports: getPortSummary("RB920"),
     img: imgRB920,
   },
   RB1100: {
     label: "RB1100AHx4",
     cat: "RouterBOARD",
     color: "#475569",
-    ports: "13×GbE",
+    ports: getPortSummary("RB1100"),
     img: imgRB1100,
   },
   RB3011: {
     label: "RB3011UiAS-RM",
     cat: "RouterBOARD",
     color: "#1e293b",
-    ports: "10×GbE 1×SFP+",
+    ports: getPortSummary("RB3011"),
     img: imgRB3011,
   },
   HEXS: {
     label: "hEX S",
     cat: "RouterBOARD",
     color: "#1a1a1a",
-    ports: "5×GbE 1×SFP",
+    ports: getPortSummary("HEXS"),
     img: imgHEXS,
   },
   GENERIC: {
@@ -108,6 +116,54 @@ export const MODEL_META = {
     ports: "—",
     img: null,
   },
+};
+
+// ─── Handles WAN (placeholder del nodo raíz) ─────────────────────────────────
+// Son los únicos handles que NO son puertos físicos — representan la "entrada"
+// de los proveedores ISP. Se mantienen arriba del nodo cuando el nodo es raíz.
+
+export const buildWanPlaceholders = () => [
+  {
+    id: "wan-placeholder-1",
+    type: "target",
+    position: Position.Top,
+    offset: 35,
+    isWan: true,
+    color: "#f97316",
+    cloudName: "Proveedor 1",
+    isPlaceholder: true,
+  },
+  {
+    id: "wan-placeholder-2",
+    type: "target",
+    position: Position.Top,
+    offset: 65,
+    isWan: true,
+    color: "#ea580c",
+    cloudName: "Proveedor 2",
+    isPlaceholder: true,
+  },
+];
+
+// COMPAT: API legacy usada por useNetworkMap / App — devolvemos array vacío
+// porque ya no hay handles genéricos. Exportada por si algún consumidor la llama.
+export const buildDefaultHandles = () => [];
+
+// ─── Puertos del catálogo (para modelos conocidos) ────────────────────────────
+// Para GENERIC creamos una fila sintética de 4 GbE para no dejar el nodo sin
+// puntos de conexión. El usuario puede cambiarlo al elegir un modelo real.
+
+const GENERIC_FALLBACK_PORTS = [
+  { id: "port1", name: "port1", type: "GbE", speed: "1 Gbps" },
+  { id: "port2", name: "port2", type: "GbE", speed: "1 Gbps" },
+  { id: "port3", name: "port3", type: "GbE", speed: "1 Gbps" },
+  { id: "port4", name: "port4", type: "GbE", speed: "1 Gbps" },
+];
+
+const getPortsForModel = (model) => {
+  const ports = MODEL_PORTS[model];
+  if (ports && ports.length > 0) return ports;
+  return GENERIC_FALLBACK_PORTS;
 };
 
 // ─── Lightbox ─────────────────────────────────────────────────────────────────
@@ -403,508 +459,758 @@ const ModelGallery = memo(({ current, onSelect, onClose }) => (
   </div>
 ));
 
-// ─── Handles ─────────────────────────────────────────────────────────────────
+// ─── Icono por tipo de puerto ─────────────────────────────────────────────────
+// Glifo visual que diferencia puertos de un vistazo (RJ45 vs SFP vs QSFP).
 
-const POSITIONS = [
-  Position.Top,
-  Position.Bottom,
-  Position.Left,
-  Position.Right,
-];
-const POSITION_LABELS = {
-  [Position.Top]: "↑ Arriba",
-  [Position.Bottom]: "↓ Abajo",
-  [Position.Left]: "← Izquierda",
-  [Position.Right]: "→ Derecha",
-};
-const HANDLE_COLORS = { source: "#3b82f6", target: "#22c55e" };
-
-// Top queda RESERVADO para handles WAN SOLO en el nodo raíz.
-// Nodos normales (no raíz) pueden usar Top para handles azules/verdes normales.
-const POSITIONS_NORMAL = [Position.Bottom, Position.Left, Position.Right];
-
-export const buildDefaultHandles = () =>
-  POSITIONS_NORMAL.flatMap((pos) => [
-    { id: `source-${pos}-0`, type: "source", position: pos, offset: 33 },
-    { id: `target-${pos}-0`, type: "target", position: pos, offset: 67 },
-  ]);
-
-// Los 2 handles WAN naranjas que aparecen en la cara superior del nodo raíz
-// Solo se agregan cuando el nodo no tiene conexiones entrantes (es raíz)
-export const buildWanPlaceholders = () => [
-  {
-    id: "wan-placeholder-1",
-    type: "target",
-    position: Position.Top,
-    offset: 35,
-    isWan: true,
-    color: "#f97316",
-    cloudName: "Proveedor 1",
-    isPlaceholder: true,
-  },
-  {
-    id: "wan-placeholder-2",
-    type: "target",
-    position: Position.Top,
-    offset: 65,
-    isWan: true,
-    color: "#ea580c",
-    cloudName: "Proveedor 2",
-    isPlaceholder: true,
-  },
-];
-
-// redistributeAllInFace — redistribuye TODOS los handles normales de una cara
-// agrupando source y target juntos para evitar cualquier solapamiento
-const redistributeAllInFace = (handles, position) => {
-  const faceHandles = handles.filter(
-    (h) => !h.isWan && h.position === position,
-  );
-  const total = faceHandles.length;
-  if (!total) return handles;
-
-  // Rango usable: 10% a 90% del lado — mínimo 14px de separación
-  const range = 80;
-  const start = 10;
-  const step = total === 1 ? 0 : range / (total - 1);
-
-  // Ordenar: primero source, luego target (para consistencia visual)
-  const ordered = [
-    ...faceHandles.filter((h) => h.type === "source"),
-    ...faceHandles.filter((h) => h.type === "target"),
-  ];
-
-  const updated = ordered.map((h, i) => ({
-    ...h,
-    offset: total === 1 ? 50 : Math.round(start + step * i),
-  }));
-
-  const map = Object.fromEntries(updated.map((h) => [h.id, h]));
-  return handles.map((h) => map[h.id] ?? h);
-};
-
-// redistributeOffsets — compatibilidad: redistribuye la cara del handle modificado
-const redistributeOffsets = (handles, position, _type) => {
-  return redistributeAllInFace(handles, position);
-};
-
-// ─── DynamicHandle ────────────────────────────────────────────────────────────
-//
-// CLAVE para alineación visual punto ↔ línea:
-// ReactFlow posiciona el handle en el borde del nodo usando `position` (Top/Bottom/Left/Right).
-// Para distribuir múltiples handles en una cara usamos:
-//   - Cara horizontal (Top/Bottom): `style.left` con % — NO tocar `top`
-//   - Cara vertical  (Left/Right):  `style.top`  con % — NO tocar `left`
-// El tamaño (width/height) debe ser impar para que el centro coincida exactamente
-// con donde ReactFlow dibuja el extremo de la línea (transform: translate(-50%,-50%))
-
-const DynamicHandle = memo(({ handle }) => {
-  const isHoriz =
-    handle.position === Position.Left || handle.position === Position.Right;
-
-  // ── Handle WAN — naranja, cara superior, solo nodo raíz ────────────────────
-  if (handle.isWan) {
-    const wanColor = handle.color ?? "#f97316";
+const PortIcon = ({ type, color, size = 14 }) => {
+  // GbE y Console → RJ45 (rectángulo con muescas)
+  if (type === "GbE" || type === "Console") {
     return (
+      <svg width={size} height={size * 0.75} viewBox="0 0 16 12">
+        <rect
+          x="1"
+          y="2"
+          width="14"
+          height="8"
+          rx="1"
+          fill={color}
+          stroke="rgba(0,0,0,0.35)"
+          strokeWidth="0.5"
+        />
+        <rect x="5" y="0" width="6" height="3" rx="0.5" fill={color} />
+        <line
+          x1="3"
+          y1="4.5"
+          x2="3"
+          y2="8"
+          stroke="#fff"
+          strokeWidth="0.6"
+          opacity="0.6"
+        />
+        <line
+          x1="5"
+          y1="4.5"
+          x2="5"
+          y2="8"
+          stroke="#fff"
+          strokeWidth="0.6"
+          opacity="0.6"
+        />
+        <line
+          x1="7"
+          y1="4.5"
+          x2="7"
+          y2="8"
+          stroke="#fff"
+          strokeWidth="0.6"
+          opacity="0.6"
+        />
+        <line
+          x1="9"
+          y1="4.5"
+          x2="9"
+          y2="8"
+          stroke="#fff"
+          strokeWidth="0.6"
+          opacity="0.6"
+        />
+        <line
+          x1="11"
+          y1="4.5"
+          x2="11"
+          y2="8"
+          stroke="#fff"
+          strokeWidth="0.6"
+          opacity="0.6"
+        />
+        <line
+          x1="13"
+          y1="4.5"
+          x2="13"
+          y2="8"
+          stroke="#fff"
+          strokeWidth="0.6"
+          opacity="0.6"
+        />
+      </svg>
+    );
+  }
+  // QSFP28 → cage ancha con dos slots
+  if (type === "QSFP28") {
+    return (
+      <svg width={size * 1.2} height={size * 0.6} viewBox="0 0 18 9">
+        <rect
+          x="0.5"
+          y="0.5"
+          width="17"
+          height="8"
+          rx="1.5"
+          fill={color}
+          stroke="rgba(0,0,0,0.35)"
+          strokeWidth="0.5"
+        />
+        <rect x="3" y="3" width="5" height="3" fill="#000" opacity="0.55" />
+        <rect x="10" y="3" width="5" height="3" fill="#000" opacity="0.55" />
+      </svg>
+    );
+  }
+  // SFP / SFP+ / SFP28 → cage rectangular con slot central
+  return (
+    <svg width={size} height={size * 0.6} viewBox="0 0 16 10">
+      <rect
+        x="0.5"
+        y="0.5"
+        width="15"
+        height="9"
+        rx="1.2"
+        fill={color}
+        stroke="rgba(0,0,0,0.35)"
+        strokeWidth="0.5"
+      />
+      <rect x="3" y="3.5" width="10" height="3" fill="#000" opacity="0.55" />
+    </svg>
+  );
+};
+
+// ─── PortTooltip ──────────────────────────────────────────────────────────────
+// Popover detallado al hover: muestra TODO sobre el puerto (nombre, tipo,
+// velocidad, nota especial, estado, y si está conectado, a qué equipo + puerto).
+
+const PortTooltip = memo(({ port, connection, visible, anchorRect }) => {
+  if (!visible || !anchorRect) return null;
+  const color = PORT_TYPE_COLORS[port.type] ?? "#94a3b8";
+
+  return ReactDOM.createPortal(
+    <div
+      style={{
+        position: "fixed",
+        left: anchorRect.left + anchorRect.width / 2,
+        top: anchorRect.top - 10,
+        transform: "translate(-50%, -100%)",
+        background: "linear-gradient(180deg, #1f2937 0%, #111827 100%)",
+        color: "#f8fafc",
+        padding: "10px 12px",
+        borderRadius: 10,
+        border: `1px solid ${color}55`,
+        boxShadow: `0 8px 24px rgba(0,0,0,0.4), 0 0 0 1px ${color}22`,
+        fontSize: 11,
+        minWidth: 200,
+        maxWidth: 280,
+        pointerEvents: "none",
+        zIndex: 999998,
+        fontFamily: "system-ui, sans-serif",
+        animation: "portTooltipIn 0.12s ease-out",
+      }}
+    >
+      {/* Encabezado: ícono + nombre + tipo */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: 6,
+          paddingBottom: 6,
+          borderBottom: `1px solid ${color}33`,
+        }}
+      >
+        <div
+          style={{
+            background: color + "22",
+            padding: 4,
+            borderRadius: 5,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <PortIcon type={port.type} color={color} size={16} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontFamily: "monospace",
+              fontWeight: 800,
+              fontSize: 13,
+              color: "#fff",
+            }}
+          >
+            {port.name}
+          </div>
+          <div style={{ fontSize: 10, color: color, fontWeight: 600 }}>
+            {port.type} · {port.speed}
+          </div>
+        </div>
+      </div>
+
+      {/* Detalles */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        {port.note && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 8,
+            }}
+          >
+            <span style={{ color: "#94a3b8" }}>Función</span>
+            <span style={{ color: "#fde68a", fontWeight: 600 }}>
+              {port.note}
+            </span>
+          </div>
+        )}
+        <div
+          style={{ display: "flex", justifyContent: "space-between", gap: 8 }}
+        >
+          <span style={{ color: "#94a3b8" }}>Velocidad máx.</span>
+          <span style={{ color: "#fff", fontFamily: "monospace" }}>
+            {port.speed}
+          </span>
+        </div>
+        <div
+          style={{ display: "flex", justifyContent: "space-between", gap: 8 }}
+        >
+          <span style={{ color: "#94a3b8" }}>Conector</span>
+          <span style={{ color: "#fff" }}>
+            {port.type === "GbE"
+              ? "RJ45 (cobre)"
+              : port.type === "QSFP28"
+                ? "QSFP28 (fibra/DAC)"
+                : port.type + " (fibra)"}
+          </span>
+        </div>
+        <div
+          style={{ display: "flex", justifyContent: "space-between", gap: 8 }}
+        >
+          <span style={{ color: "#94a3b8" }}>Estado</span>
+          <span
+            style={{
+              color: connection ? "#22c55e" : "#64748b",
+              fontWeight: 700,
+            }}
+          >
+            {connection ? "● Conectado" : "○ Libre"}
+          </span>
+        </div>
+
+        {connection && (
+          <div
+            style={{
+              marginTop: 6,
+              paddingTop: 6,
+              borderTop: `1px solid ${color}22`,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 9,
+                color: "#94a3b8",
+                marginBottom: 3,
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+              }}
+            >
+              Conectado a
+            </div>
+            <div
+              style={{
+                fontFamily: "monospace",
+                color: "#fff",
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              {connection.remoteName}
+            </div>
+            <div
+              style={{
+                fontFamily: "monospace",
+                color: color,
+                fontSize: 10,
+                marginTop: 1,
+              }}
+            >
+              ↔ {connection.remotePort || "?"}
+            </div>
+            {connection.linkType && (
+              <div style={{ fontSize: 10, color: "#cbd5e1", marginTop: 2 }}>
+                {connection.linkType}
+                {connection.bandwidth ? ` · ${connection.bandwidth}` : ""}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Flecha apuntando hacia el puerto */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: -6,
+          left: "50%",
+          transform: "translateX(-50%) rotate(45deg)",
+          width: 10,
+          height: 10,
+          background: "#111827",
+          borderRight: `1px solid ${color}55`,
+          borderBottom: `1px solid ${color}55`,
+        }}
+      />
+    </div>,
+    document.body,
+  );
+});
+
+// ─── Inyectar animación del tooltip (una sola vez) ────────────────────────────
+let tooltipStylesInjected = false;
+const injectTooltipStyles = () => {
+  if (tooltipStylesInjected) return;
+  tooltipStylesInjected = true;
+  const s = document.createElement("style");
+  s.textContent = `
+    @keyframes portTooltipIn {
+      from { opacity: 0; transform: translate(-50%, -95%) scale(0.96); }
+      to   { opacity: 1; transform: translate(-50%, -100%) scale(1); }
+    }
+  `;
+  document.head.appendChild(s);
+};
+injectTooltipStyles();
+
+// ─── Port (una celda del panel frontal) ───────────────────────────────────────
+
+const Port = memo(({ port, isConnected, connection }) => {
+  const [hovered, setHovered] = useState(false);
+  const [rect, setRect] = useState(null);
+  const color = PORT_TYPE_COLORS[port.type] ?? "#94a3b8";
+  const label = PORT_TYPE_LABELS[port.type] ?? "—";
+  const numLabel = port.name.replace(/^[a-z-]+/i, "") || port.name;
+
+  const onEnter = (e) => {
+    setHovered(true);
+    setRect(e.currentTarget.getBoundingClientRect());
+  };
+  const onLeave = () => {
+    setHovered(false);
+    setRect(null);
+  };
+
+  return (
+    <div
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      style={{
+        flex: 1,
+        minWidth: 0,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "stretch",
+        position: "relative",
+      }}
+    >
+      <PortTooltip
+        port={port}
+        connection={connection}
+        visible={hovered}
+        anchorRect={rect}
+      />
+
+      {/* Cage del puerto (visual tipo placa frontal) */}
+      <div
+        style={{
+          background: isConnected
+            ? `linear-gradient(180deg, ${color} 0%, ${color}dd 60%, ${color}99 100%)`
+            : `linear-gradient(180deg, ${color}22 0%, ${color}11 100%)`,
+          border: `1px solid ${isConnected ? color : color + "55"}`,
+          borderRadius: 4,
+          padding: "4px 2px 5px",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 2,
+          minHeight: 50,
+          boxShadow: isConnected
+            ? `0 0 6px ${color}88, inset 0 1px 0 rgba(255,255,255,0.25), inset 0 -1px 2px rgba(0,0,0,0.3)`
+            : `inset 0 1px 0 rgba(255,255,255,0.04), inset 0 -1px 2px rgba(0,0,0,0.25)`,
+          cursor: "crosshair",
+          position: "relative",
+          transition: "all 0.15s",
+        }}
+      >
+        {/* LED + etiquetas PoE/MGMT */}
+        <div
+          style={{
+            display: "flex",
+            gap: 2,
+            alignItems: "center",
+            justifyContent: "center",
+            minHeight: 6,
+          }}
+        >
+          <div
+            style={{
+              width: 4,
+              height: 4,
+              borderRadius: "50%",
+              background: isConnected ? "#4ade80" : "#475569",
+              boxShadow: isConnected
+                ? "0 0 4px #4ade80, 0 0 2px #fff inset"
+                : "inset 0 0 2px rgba(0,0,0,0.5)",
+            }}
+          />
+          {port.note === "PoE-out" && (
+            <div
+              title="PoE output"
+              style={{
+                fontSize: 6.5,
+                fontWeight: 900,
+                color: isConnected ? "#fef3c7" : "#f59e0b",
+                letterSpacing: "-0.5px",
+              }}
+            >
+              PoE
+            </div>
+          )}
+          {(port.note === "mgmt" || port.note === "mgmt/CPU") && (
+            <div
+              title="Management / CPU directo"
+              style={{
+                fontSize: 6.5,
+                fontWeight: 900,
+                color: isConnected ? "#e0e7ff" : "#a78bfa",
+                letterSpacing: "-0.3px",
+              }}
+            >
+              MGMT
+            </div>
+          )}
+        </div>
+
+        {/* Ícono del conector */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "1px 0",
+          }}
+        >
+          <PortIcon
+            type={port.type}
+            color={isConnected ? "#0f172a" : color}
+            size={18}
+          />
+        </div>
+
+        {/* Número del puerto */}
+        <div
+          style={{
+            fontSize: 8,
+            fontFamily: "ui-monospace, monospace",
+            fontWeight: 800,
+            color: isConnected ? "#fff" : color,
+            lineHeight: 1,
+            letterSpacing: "-0.3px",
+          }}
+        >
+          {numLabel}
+        </div>
+
+        {/* Velocidad */}
+        <div
+          style={{
+            fontSize: 7,
+            fontWeight: 800,
+            color: isConnected ? "rgba(255,255,255,0.85)" : color + "bb",
+            lineHeight: 1,
+            letterSpacing: "0.5px",
+          }}
+        >
+          {label}
+        </div>
+      </div>
+
+      {/* Handle de React Flow — invisible, cubre todo el chip.
+          Position.Top hace que los cables nazcan del borde SUPERIOR del chip
+          y suban por encima del card hacia los otros nodos. */}
       <Handle
-        type="target"
+        type="source"
         position={Position.Top}
-        id={handle.id}
+        id={port.id}
         isConnectable
         isConnectableStart
         isConnectableEnd
         style={{
-          // ReactFlow posiciona en borde Top. Solo ajustamos left para distribuir
-          // múltiples handles. top queda en el valor por defecto (-4px = mitad del círculo)
-          left: `${handle.offset}%`,
-          top: -6, // mitad del círculo de 13px sobresale del borde
-          transform: "translateX(-50%)", // centrar sobre el punto
-          width: 14,
-          height: 14,
-          background: wanColor,
-          border: "3px solid white",
-          borderRadius: "50%",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          width: "100%",
+          height: "100%",
+          background: "transparent",
+          border: "none",
+          borderRadius: 4,
+          transform: "none",
+          position: "absolute",
           cursor: "crosshair",
-          zIndex: 30,
-          boxShadow: `0 0 0 3px ${wanColor}55, 0 2px 8px rgba(0,0,0,0.3)`,
-          position: "absolute", // necesario para que left/top funcionen
+          zIndex: 5,
+          pointerEvents: "all",
         }}
-        title={`☁️ Entrada WAN: ${handle.cloudName ?? "Proveedor"}`}
       />
-    );
-  }
 
-  // ── Handle normal — azul (source) o verde (target) ─────────────────────────
+      {/* Punto de anclaje visible — de aquí sale el cable (ahora arriba) */}
+      <div
+        style={{
+          position: "absolute",
+          top: -4,
+          left: "50%",
+          transform: "translateX(-50%)",
+          width: 6,
+          height: 6,
+          borderRadius: "50%",
+          background: isConnected ? color : "#334155",
+          border: `1.5px solid ${isConnected ? "#fff" : color + "66"}`,
+          boxShadow: isConnected
+            ? `0 0 0 2px ${color}44, 0 0 6px ${color}`
+            : "none",
+          pointerEvents: "none",
+          zIndex: 6,
+          transition: "all 0.15s",
+        }}
+      />
+    </div>
+  );
+});
+
+// ─── PortPanel — panel frontal completo con todos los puertos ─────────────────
+
+const PortPanel = memo(({ model, portsUsage, lastBlock = false }) => {
+  const ports = getPortsForModel(model);
+  if (ports.length === 0) return null;
+
+  // Agrupar visualmente por tipo (como en un router real: bloque RJ45 + SFP + QSFP).
+  const groups = [];
+  let currentGroup = null;
+  ports.forEach((p) => {
+    if (!currentGroup || currentGroup.type !== p.type) {
+      currentGroup = { type: p.type, ports: [p] };
+      groups.push(currentGroup);
+    } else {
+      currentGroup.ports.push(p);
+    }
+  });
+
+  const usedCount = ports.filter((p) => portsUsage?.has(p.id)).length;
+
+  return (
+    <div
+      style={{
+        background:
+          "linear-gradient(180deg, #111827 0%, #0b1220 50%, #111827 100%)",
+        borderTop: "1px solid #000",
+        // Si es el último bloque del card, no ponemos borde inferior extra
+        // y redondeamos las esquinas para que encaje con el borderRadius
+        // del card contenedor.
+        borderBottom: lastBlock ? "none" : "1px solid #000",
+        borderRadius: lastBlock ? "0 0 10px 10px" : 0,
+        padding: "8px 8px 10px",
+        position: "relative",
+      }}
+    >
+      {/* Tornillos decorativos — detalle de realismo */}
+      {[
+        { top: 3, left: 3 },
+        { top: 3, right: 3 },
+        { bottom: 3, left: 3 },
+        { bottom: 3, right: 3 },
+      ].map((pos, i) => (
+        <div
+          key={i}
+          style={{
+            position: "absolute",
+            ...pos,
+            width: 4,
+            height: 4,
+            borderRadius: "50%",
+            background:
+              "radial-gradient(circle, #64748b 0%, #334155 60%, #1e293b 100%)",
+            boxShadow: "inset 0 0 1px rgba(0,0,0,0.6), 0 0 1px rgba(0,0,0,0.8)",
+          }}
+        />
+      ))}
+
+      {/* Etiqueta del panel */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 5,
+          padding: "0 4px",
+        }}
+      >
+        <span
+          style={{
+            fontSize: 8,
+            fontWeight: 800,
+            color: "#64748b",
+            textTransform: "uppercase",
+            letterSpacing: "0.12em",
+          }}
+        >
+          Panel frontal · {ports.length} puertos
+        </span>
+        <span
+          style={{
+            fontSize: 8,
+            fontFamily: "monospace",
+            fontWeight: 700,
+            color: usedCount > 0 ? "#4ade80" : "#475569",
+          }}
+        >
+          {usedCount}/{ports.length} en uso
+        </span>
+      </div>
+
+      {/* Fila de puertos, agrupados por tipo con separador sutil */}
+      <div
+        style={{
+          display: "flex",
+          gap: 2,
+          alignItems: "stretch",
+        }}
+      >
+        {groups.map((g, gi) => (
+          <React.Fragment key={g.type + gi}>
+            <div
+              style={{
+                display: "flex",
+                gap: 2,
+                flex: g.ports.length,
+                minWidth: 0,
+              }}
+            >
+              {g.ports.map((p) => {
+                const connection = portsUsage?.get?.(p.id) ?? null;
+                return (
+                  <Port
+                    key={p.id}
+                    port={p}
+                    isConnected={!!connection}
+                    connection={connection}
+                  />
+                );
+              })}
+            </div>
+            {gi < groups.length - 1 && (
+              <div
+                style={{
+                  width: 1,
+                  alignSelf: "stretch",
+                  margin: "2px 2px",
+                  background:
+                    "linear-gradient(180deg, transparent 0%, #475569 50%, transparent 100%)",
+                }}
+              />
+            )}
+          </React.Fragment>
+        ))}
+      </div>
+
+      {/* Leyenda: resumen de tipos */}
+      <div
+        style={{
+          display: "flex",
+          gap: 6,
+          justifyContent: "center",
+          marginTop: 7,
+          flexWrap: "wrap",
+        }}
+      >
+        {Array.from(new Set(ports.map((p) => p.type))).map((type) => {
+          const c = PORT_TYPE_COLORS[type];
+          const count = ports.filter((p) => p.type === type).length;
+          const label = PORT_TYPE_LABELS[type];
+          return (
+            <div
+              key={type}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 3,
+                fontSize: 8.5,
+                color: "#94a3b8",
+                fontWeight: 600,
+                background: "rgba(255,255,255,0.03)",
+                padding: "1px 6px",
+                borderRadius: 10,
+                border: `0.5px solid ${c}44`,
+              }}
+            >
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: 1.5,
+                  background: c,
+                  display: "inline-block",
+                  boxShadow: `0 0 3px ${c}99`,
+                }}
+              />
+              <span style={{ color: "#e2e8f0" }}>{count}×</span>
+              <span style={{ color: c, fontWeight: 700 }}>{type}</span>
+              <span style={{ color: "#64748b" }}>{label}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+});
+
+// ─── Handle WAN (arriba, naranja, solo nodo raíz) ────────────────────────────
+
+const WanHandle = memo(({ handle }) => {
+  const wanColor = handle.color ?? "#f97316";
   return (
     <Handle
-      type={handle.type}
-      position={handle.position}
+      type="target"
+      position={Position.Top}
       id={handle.id}
       isConnectable
       isConnectableStart
       isConnectableEnd
       style={{
-        // Para cara horizontal (Top/Bottom): controlar left
-        // Para cara vertical  (Left/Right):  controlar top
-        // NO mezclar — no poner left en Left/Right ni top en Top/Bottom
-        ...(isHoriz
-          ? { top: `${handle.offset}%` } // cara lateral → ajustar vertical
-          : { left: `${handle.offset}%` }), // cara Top/Bottom → ajustar horizontal
-        width: 12,
-        height: 12,
-        background: HANDLE_COLORS[handle.type],
-        border: "2px solid white",
+        left: `${handle.offset}%`,
+        top: -6,
+        transform: "translateX(-50%)",
+        width: 14,
+        height: 14,
+        background: wanColor,
+        border: "3px solid white",
         borderRadius: "50%",
-        boxShadow: "0 1px 4px rgba(0,0,0,0.25)",
         cursor: "crosshair",
-        zIndex: 10,
+        zIndex: 30,
+        boxShadow: `0 0 0 3px ${wanColor}55, 0 2px 8px rgba(0,0,0,0.3)`,
+        position: "absolute",
       }}
+      title={`☁️ Entrada WAN: ${handle.cloudName ?? "Proveedor"}`}
     />
   );
 });
 
-// ─── Panel de handles ─────────────────────────────────────────────────────────
+// ─── CustomNode ───────────────────────────────────────────────────────────────
 
-const HandlePanel = memo(
-  ({ handles, onAdd, onRemove, onClose, isRootNode }) => {
-    const [selPos, setSelPos] = useState(Position.Bottom);
-    const [selType, setSelType] = useState("source");
-    // Solo contar handles NO-WAN para la lógica de eliminación
-    const count = (pos, type) =>
-      handles.filter((h) => !h.isWan && h.position === pos && h.type === type)
-        .length;
-    const stop = (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-    };
-
-    return (
-      <div
-        onMouseDown={stop}
-        onPointerDown={stop}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: "calc(100% + 12px)",
-          width: 224,
-          background: "#fff",
-          border: "1px solid #e2e8f0",
-          borderRadius: 12,
-          boxShadow: "0 8px 32px rgba(0,0,0,0.13)",
-          zIndex: 99999,
-          padding: 14,
-          fontSize: 12,
-          userSelect: "none",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 12,
-          }}
-        >
-          <span style={{ fontWeight: 700, fontSize: 13, color: "#1e293b" }}>
-            ⚙ Puntos
-          </span>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onClose();
-            }}
-            style={{
-              background: "#ef4444",
-              border: "none",
-              borderRadius: "50%",
-              width: 24,
-              height: 24,
-              cursor: "pointer",
-              fontSize: 13,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: "#fff",
-              fontWeight: 900,
-            }}
-          >
-            ✕
-          </button>
-        </div>
-        <p
-          style={{
-            color: "#94a3b8",
-            fontSize: 10,
-            fontWeight: 700,
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
-            marginBottom: 6,
-          }}
-        >
-          Cara
-        </p>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 4,
-            marginBottom: 10,
-          }}
-        >
-          {POSITIONS.map((pos) => {
-            // Top bloqueado SOLO para nodo raíz (reservado para WAN naranjas)
-            const isTopBlocked = pos === Position.Top && isRootNode;
-            const isSelec = selPos === pos;
-            return (
-              <button
-                key={pos}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (!isTopBlocked) setSelPos(pos);
-                }}
-                title={
-                  isTopBlocked
-                    ? "Reservado para entradas WAN (proveedores)"
-                    : ""
-                }
-                style={{
-                  padding: "5px 4px",
-                  borderRadius: 6,
-                  fontSize: 11,
-                  cursor: isTopBlocked ? "not-allowed" : "pointer",
-                  border: `1.5px solid ${isTopBlocked ? "#fed7aa" : isSelec ? "#6366f1" : "#e2e8f0"}`,
-                  background: isTopBlocked
-                    ? "#fff7ed"
-                    : isSelec
-                      ? "#eef2ff"
-                      : "#f8fafc",
-                  color: isTopBlocked
-                    ? "#c2410c"
-                    : isSelec
-                      ? "#4f46e5"
-                      : "#64748b",
-                  fontWeight: isSelec ? 700 : 400,
-                  opacity: isTopBlocked ? 0.7 : 1,
-                }}
-              >
-                {POSITION_LABELS[pos]}
-                {isTopBlocked && (
-                  <span
-                    style={{ fontSize: 8, display: "block", color: "#c2410c" }}
-                  >
-                    solo WAN
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-        <p
-          style={{
-            color: "#94a3b8",
-            fontSize: 10,
-            fontWeight: 700,
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
-            marginBottom: 6,
-          }}
-        >
-          Tipo
-        </p>
-        <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-          {["source", "target"].map((type) => (
-            <button
-              key={type}
-              onClick={(e) => {
-                e.stopPropagation();
-                setSelType(type);
-              }}
-              style={{
-                flex: 1,
-                padding: "6px 0",
-                borderRadius: 6,
-                fontSize: 11,
-                cursor: "pointer",
-                fontWeight: 600,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 5,
-                border: `1.5px solid ${selType === type ? HANDLE_COLORS[type] : "#e2e8f0"}`,
-                background:
-                  selType === type
-                    ? type === "source"
-                      ? "#eff6ff"
-                      : "#f0fdf4"
-                    : "#f8fafc",
-                color: selType === type ? HANDLE_COLORS[type] : "#94a3b8",
-              }}
-            >
-              <span
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  background: HANDLE_COLORS[type],
-                  display: "inline-block",
-                }}
-              />
-              {type === "source" ? "Origen" : "Destino"}
-            </button>
-          ))}
-        </div>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onAdd(selPos, selType);
-          }}
-          style={{
-            width: "100%",
-            padding: "8px 0",
-            background: "#6366f1",
-            color: "#fff",
-            border: "none",
-            borderRadius: 8,
-            cursor: "pointer",
-            fontWeight: 700,
-            fontSize: 12,
-            marginBottom: 14,
-          }}
-        >
-          + Agregar punto
-        </button>
-        <p
-          style={{
-            color: "#94a3b8",
-            fontSize: 10,
-            fontWeight: 700,
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
-            marginBottom: 6,
-          }}
-        >
-          Actuales ({handles.filter((h) => !h.isWan).length})
-        </p>
-        <div
-          style={{
-            maxHeight: 150,
-            overflowY: "auto",
-            display: "flex",
-            flexDirection: "column",
-            gap: 3,
-          }}
-        >
-          {handles
-            .filter((h) => !h.isWan)
-            .map((h) => {
-              const canDelete = count(h.position, h.type) > 1;
-              return (
-                <div
-                  key={h.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "4px 8px",
-                    background: "#f8fafc",
-                    borderRadius: 6,
-                    border: "1px solid #f1f5f9",
-                  }}
-                >
-                  <div
-                    style={{ display: "flex", alignItems: "center", gap: 6 }}
-                  >
-                    <span
-                      style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: "50%",
-                        background: HANDLE_COLORS[h.type],
-                        display: "inline-block",
-                      }}
-                    />
-                    <span style={{ color: "#475569", fontSize: 11 }}>
-                      {POSITION_LABELS[h.position]} ·{" "}
-                      {h.type === "source" ? "Orig" : "Dest"}
-                    </span>
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (canDelete) onRemove(h.id);
-                    }}
-                    style={{
-                      width: 20,
-                      height: 20,
-                      borderRadius: 4,
-                      border: "none",
-                      background: canDelete ? "#fee2e2" : "#f1f5f9",
-                      color: canDelete ? "#ef4444" : "#cbd5e1",
-                      cursor: canDelete ? "pointer" : "not-allowed",
-                      fontSize: 13,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: 700,
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
-              );
-            })}
-          {/* Handles WAN — solo informativos, no se pueden borrar desde aquí */}
-          {handles
-            .filter((h) => h.isWan)
-            .map((h) => (
-              <div
-                key={h.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "4px 8px",
-                  background: "#f0f9ff",
-                  borderRadius: 6,
-                  border: `1px solid ${h.color}33`,
-                }}
-              >
-                <span
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: "50%",
-                    background: h.color,
-                    display: "inline-block",
-                    boxShadow: `0 0 0 2px ${h.color}44`,
-                  }}
-                />
-                <span style={{ color: "#1e3a5f", fontSize: 11 }}>
-                  ↑ WAN · {h.cloudName ?? "Proveedor"}
-                </span>
-              </div>
-            ))}
-        </div>
-      </div>
-    );
-  },
-);
-
-// ─── CustomNode principal ─────────────────────────────────────────────────────
-
-const CustomNode = ({ data, selected, id }) => {
-  const [panel, setPanel] = useState(null);
+const CustomNode = ({ id, data, selected }) => {
+  const [panel, setPanel] = useState(null); // null | "model"
   const [lightboxOpen, setLightboxOpen] = useState(false);
 
-  const handles = useMemo(
-    () => (data.handles?.length ? data.handles : buildDefaultHandles()),
-    [data.handles],
-  );
   const model = data.model ?? "GENERIC";
   const meta = MODEL_META[model] ?? MODEL_META.GENERIC;
+  const ports = getPortsForModel(model);
+  const portCount = ports.length;
+
   const isOnline = data.status === "online";
   const isOffline = data.status === "offline";
-  const ping = data.ping != null ? `${data.ping}ms` : null;
 
   // ── Rol inteligente ───────────────────────────────────────────────────────
   const srcCount = data.connectionsAsSource?.length ?? 0;
@@ -917,7 +1223,7 @@ const CustomNode = ({ data, selected, id }) => {
     roleLabel = "Nodo raíz";
     roleBg = "#f3f0ff";
     roleColor = "#7c3aed";
-    roleTooltip = `Nodo raíz — punto de entrada de proveedores.\n\n• Recibe conexiones de proveedores ISP (puntos naranjas).\n• Distribuye hacia ${srcCount} equipo${srcCount !== 1 ? "s" : ""} de la red.`;
+    roleTooltip = `Nodo raíz — punto de entrada de proveedores.\n\n• Recibe conexiones de proveedores ISP (puntos naranjas arriba).\n• Distribuye hacia ${srcCount} equipo${srcCount !== 1 ? "s" : ""} de la red.`;
   } else if (srcCount > 0 && tgtCount > 0) {
     roleIcon = "🔄";
     roleLabel = "Intermedio";
@@ -941,46 +1247,47 @@ const CustomNode = ({ data, selected, id }) => {
     roleLabel = "Aislado";
     roleBg = "#f8fafc";
     roleColor = "#64748b";
-    roleTooltip = `Nodo aislado — sin conexiones.\n\n• Para integrarlo, conéctalo a otro equipo\n  arrastrando desde un punto de origen.`;
+    roleTooltip = `Nodo aislado — sin conexiones.\n\n• Para integrarlo, arrastra desde un puerto\n  de este equipo a un puerto de otro.`;
   }
 
-  // Handles WAN para mostrar indicador visual arriba
-  const wanHandles = handles.filter((h) => h.isWan);
+  // ── Mapa de puertos usados ↔ información de conexión ──────────────────────
+  // Para cada puerto físico, si tiene conexión, guardamos remoteName/remotePort/
+  // linkType/bandwidth. Alimenta el tooltip y el estado iluminado del chip.
+  const portsUsage = useMemo(() => {
+    const map = new Map();
+    (data.connectionsAsSource ?? []).forEach((c) => {
+      if (c.sourceHandle) {
+        map.set(c.sourceHandle, {
+          remoteName: c.target?.name ?? "?",
+          remotePort: c.targetHandle || c.targetInterface || null,
+          linkType: c.linkType,
+          bandwidth: c.bandwidth,
+          direction: "out",
+        });
+      }
+    });
+    (data.connectionsAsTarget ?? []).forEach((c) => {
+      if (c.targetHandle) {
+        map.set(c.targetHandle, {
+          remoteName: c.source?.name ?? "?",
+          remotePort: c.sourceHandle || c.sourceInterface || null,
+          linkType: c.linkType,
+          bandwidth: c.bandwidth,
+          direction: "in",
+        });
+      }
+    });
+    return map;
+  }, [data.connectionsAsSource, data.connectionsAsTarget]);
 
-  const handleAdd = useCallback(
-    (position, type) => {
-      // Top bloqueado SOLO para nodo raíz (reservado para handles WAN naranjos)
-      if (position === Position.Top && isRootNode) return;
-      const newH = {
-        id: `${type}-${position}-${Date.now()}`,
-        type,
-        position,
-        offset: 50,
-      };
-      // redistributeOffsets redistribuye TODA la cara — sin solapamiento
-      data.onHandlesChange?.(
-        id,
-        redistributeOffsets([...handles, newH], position, type),
-      );
-    },
-    [handles, id, data, isRootNode],
-  );
+  // ── Handles WAN (solo nodo raíz) ──────────────────────────────────────────
+  const wanHandles = useMemo(() => {
+    const fromData = (data.handles ?? []).filter((h) => h.isWan);
+    if (fromData.length > 0) return fromData;
+    return isRootNode ? buildWanPlaceholders() : [];
+  }, [data.handles, isRootNode]);
 
-  const handleRemove = useCallback(
-    (handleId) => {
-      const h = handles.find((x) => x.id === handleId);
-      if (!h || h.isWan) return;
-      data.onHandlesChange?.(
-        id,
-        redistributeOffsets(
-          handles.filter((x) => x.id !== handleId),
-          h.position,
-          h.type,
-        ),
-      );
-    },
-    [handles, id, data],
-  );
+  // ── Callbacks ─────────────────────────────────────────────────────────────
 
   const handleModelSelect = useCallback(
     (newModel) => {
@@ -1014,6 +1321,11 @@ const CustomNode = ({ data, selected, id }) => {
         ? "#ef444422"
         : "#e2e8f0";
 
+  // Ancho dinámico: más puertos → card más ancho.
+  // ~22px por puerto + 40px de márgenes/padding laterales.
+  const minWidth = Math.max(220, portCount * 22 + 40);
+  const maxWidth = Math.max(280, portCount * 28 + 60);
+
   return (
     <div style={{ position: "relative" }}>
       {lightboxOpen && meta.img && (
@@ -1025,20 +1337,11 @@ const CustomNode = ({ data, selected, id }) => {
         />
       )}
 
-      {/* Todos los handles */}
-      {handles.map((h) => (
-        <DynamicHandle key={h.id} handle={h} />
+      {/* WAN handles (solo nodo raíz) */}
+      {wanHandles.map((h) => (
+        <WanHandle key={h.id} handle={h} />
       ))}
 
-      {panel === "handles" && (
-        <HandlePanel
-          handles={handles}
-          onAdd={handleAdd}
-          onRemove={handleRemove}
-          onClose={() => setPanel(null)}
-          isRootNode={isRootNode}
-        />
-      )}
       {panel === "model" && (
         <ModelGallery
           current={model}
@@ -1057,137 +1360,54 @@ const CustomNode = ({ data, selected, id }) => {
           boxShadow: selected
             ? "0 0 0 3px rgba(59,130,246,0.15), 0 4px 16px rgba(0,0,0,0.1)"
             : "0 2px 10px rgba(0,0,0,0.07)",
-          minWidth: 200,
-          maxWidth: 220,
-          overflow: "visible",
-          transition: "border-color 0.15s, box-shadow 0.15s",
-          borderTop: `3px solid ${meta.color}`,
-          cursor: "default",
+          minWidth,
+          maxWidth,
+          overflow: "visible", // tooltip puede salirse
+          transition: "all 0.15s",
         }}
       >
-        {/* Indicadores WAN arriba de la tarjeta */}
-        {wanHandles.length > 0 && (
-          <div
-            style={{
-              position: "absolute",
-              top: -22,
-              left: 0,
-              right: 0,
-              display: "flex",
-              justifyContent: "center",
-              gap: 5,
-              pointerEvents: "none",
-            }}
-          >
-            {wanHandles.map((wh) => (
-              <div
-                key={wh.id}
-                title={wh.cloudName}
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  background: wh.color,
-                  border: "1.5px solid white",
-                  boxShadow: `0 0 0 2px ${wh.color}55`,
-                }}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Header */}
+        {/* Toolbar: solo botón de cambio de modelo (ya no hay gear de handles) */}
         <div
           style={{
             display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "6px 8px 4px",
-            borderBottom: "0.5px solid #f1f5f9",
+            justifyContent: "flex-end",
+            gap: 4,
+            padding: "4px 6px 0",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <span
-              style={{
-                width: 7,
-                height: 7,
-                borderRadius: "50%",
-                background: isOnline ? "#22c55e" : "#ef4444",
-                display: "inline-block",
-                boxShadow: isOnline ? "0 0 0 2px rgba(34,197,94,0.25)" : "none",
-              }}
-            />
-            <span
-              style={{
-                fontSize: 10,
-                fontWeight: 600,
-                color: isOnline ? "#16a34a" : "#dc2626",
-              }}
-            >
-              {isOnline ? "Online" : "Offline"}
-            </span>
-            {ping && (
-              <span
-                style={{
-                  fontSize: 9,
-                  background: "#f0fdf4",
-                  color: "#15803d",
-                  border: "0.5px solid #bbf7d0",
-                  borderRadius: 4,
-                  padding: "1px 4px",
-                  fontFamily: "monospace",
-                }}
-              >
-                {ping}
-              </span>
-            )}
-          </div>
-          <div style={{ display: "flex", gap: 4 }}>
-            <button
-              onClick={togglePanel("model")}
-              title="Cambiar modelo"
-              style={{
-                width: 22,
-                height: 22,
-                borderRadius: 5,
-                padding: 0,
-                fontWeight: 700,
-                fontSize: 11,
-                border: `1.5px solid ${panel === "model" ? meta.color : "#e2e8f0"}`,
-                background: panel === "model" ? "#f0f9ff" : "#f8fafc",
-                color: panel === "model" ? meta.color : "#94a3b8",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              ⬡
-            </button>
-            <button
-              onClick={togglePanel("handles")}
-              title="Gestionar puntos"
-              style={{
-                width: 22,
-                height: 22,
-                borderRadius: 5,
-                padding: 0,
-                border: `1.5px solid ${panel === "handles" ? "#6366f1" : "#e2e8f0"}`,
-                background: panel === "handles" ? "#eef2ff" : "#f8fafc",
-                color: panel === "handles" ? "#4f46e5" : "#94a3b8",
-                cursor: "pointer",
-                fontSize: 12,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              ⚙
-            </button>
-          </div>
+          <button
+            onClick={togglePanel("model")}
+            title="Cambiar modelo"
+            style={{
+              width: 22,
+              height: 22,
+              borderRadius: 5,
+              padding: 0,
+              fontWeight: 700,
+              fontSize: 11,
+              border: `1.5px solid ${panel === "model" ? meta.color : "#e2e8f0"}`,
+              background: panel === "model" ? "#f0f9ff" : "#f8fafc",
+              color: panel === "model" ? meta.color : "#94a3b8",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            ⬡
+          </button>
         </div>
 
-        {/* Imagen — clic = lightbox */}
+        {/* ── 1. IMAGEN DEL ROUTER (arriba) ────────────────────────────── */}
+        {/*
+            Orden vertical del card:
+              Toolbar (botón de modelo)
+              → Imagen del router
+              → Info: rol + nombre + modelo + IP
+              → PortPanel (panel frontal con puertos) — AL FINAL
+            Los cables nacen del BORDE SUPERIOR de cada puerto (Position.Top)
+            y suben cruzando por encima del card hacia los otros nodos.
+        */}
         <div
           onClick={(e) => {
             e.stopPropagation();
@@ -1197,7 +1417,6 @@ const CustomNode = ({ data, selected, id }) => {
           style={{
             background: "#2d3748",
             padding: "8px 10px",
-            borderBottom: "0.5px solid #1a202c",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -1238,9 +1457,9 @@ const CustomNode = ({ data, selected, id }) => {
           )}
         </div>
 
-        {/* Info */}
+        {/* ── 2. INFO / DETALLES (medio) ──────────────────────────────── */}
         <div style={{ padding: "8px 10px 6px" }}>
-          {/* Badge de rol */}
+          {/* Rol + contadores */}
           <div
             title={roleTooltip}
             style={{
@@ -1281,6 +1500,7 @@ const CustomNode = ({ data, selected, id }) => {
             )}
           </div>
 
+          {/* Nombre */}
           <div
             style={{
               fontSize: 12,
@@ -1295,12 +1515,13 @@ const CustomNode = ({ data, selected, id }) => {
             {data.name || "Sin nombre"}
           </div>
 
+          {/* Modelo + categoría + IP en una fila compacta */}
           <div
             style={{
               display: "flex",
               alignItems: "center",
-              gap: 5,
-              marginBottom: 5,
+              gap: 6,
+              flexWrap: "wrap",
             }}
           >
             <span
@@ -1317,110 +1538,27 @@ const CustomNode = ({ data, selected, id }) => {
               {model}
             </span>
             <span style={{ fontSize: 9.5, color: "#94a3b8" }}>{meta.cat}</span>
-          </div>
-
-          <div
-            style={{
-              fontSize: 11,
-              fontFamily: "monospace",
-              color: "#475569",
-              background: "#f8fafc",
-              borderRadius: 5,
-              padding: "3px 7px",
-              display: "inline-block",
-              border: "0.5px solid #e2e8f0",
-            }}
-          >
-            {data.ip || "—"}
-          </div>
-
-          <div
-            style={{
-              fontSize: 9,
-              color: "#cbd5e1",
-              marginTop: 5,
-              textAlign: "center",
-            }}
-          >
-            doble clic para detalles
-          </div>
-        </div>
-
-        {/* Leyenda handles */}
-        <div
-          style={{
-            borderTop: "0.5px solid #f1f5f9",
-            padding: "4px 10px",
-            display: "flex",
-            gap: 10,
-            justifyContent: "center",
-          }}
-        >
-          <span
-            style={{
-              fontSize: 10,
-              color: "#94a3b8",
-              display: "flex",
-              alignItems: "center",
-              gap: 3,
-            }}
-          >
             <span
               style={{
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                background: "#3b82f6",
-                display: "inline-block",
-              }}
-            />
-            Orig (
-            {handles.filter((h) => !h.isWan && h.type === "source").length})
-          </span>
-          <span
-            style={{
-              fontSize: 10,
-              color: "#94a3b8",
-              display: "flex",
-              alignItems: "center",
-              gap: 3,
-            }}
-          >
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: "50%",
-                background: "#22c55e",
-                display: "inline-block",
-              }}
-            />
-            Dest (
-            {handles.filter((h) => !h.isWan && h.type === "target").length})
-          </span>
-          {wanHandles.length > 0 && (
-            <span
-              style={{
-                fontSize: 10,
-                color: "#64748b",
-                display: "flex",
-                alignItems: "center",
-                gap: 3,
+                fontSize: 10.5,
+                fontFamily: "monospace",
+                color: "#475569",
+                background: "#f8fafc",
+                borderRadius: 4,
+                padding: "1px 6px",
+                border: "0.5px solid #e2e8f0",
+                marginLeft: "auto",
               }}
             >
-              <span
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: "50%",
-                  background: wanHandles[0].color,
-                  display: "inline-block",
-                }}
-              />
-              WAN ({wanHandles.length})
+              {data.ip || "—"}
             </span>
-          )}
+          </div>
         </div>
+
+        {/* ── 3. PANEL FRONTAL (AL FINAL, con puertos físicos) ────────── */}
+        {/* Los puertos tienen Position.Top → los cables nacen del borde
+            superior de cada chip y suben por encima del card. */}
+        <PortPanel model={model} portsUsage={portsUsage} lastBlock />
       </div>
     </div>
   );
